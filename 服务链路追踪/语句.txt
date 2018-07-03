@@ -1,0 +1,3 @@
+```java
+java -jar zipkin.jar --zipkin.collector.rabbitmq.addresses=localhost --zipkin.storage.type=mysql --zipkin.storage.mysql.host=localhost --zipkin.storage.mysql.port=3306 --zipkin.storage.mysql.username=root --zipkin.storage.mysql.password=12345678 --zipkin.storage.mysql.db=chapter11 --zipkin.storage.mysql.use-ssl=false
+```
