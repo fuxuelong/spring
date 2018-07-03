@@ -7,8 +7,8 @@
 &emsp;需要特别注意的是在，Spring Boot 2.X以前，服务链路追踪的服务中心是需要自己创建的,但是在Spring Boot2.X版本之后，官方就不推荐自行定制服务端了，而是提供一个编译好的jar包供我们使用。
 
 ### 1. Eureka Server
-    在编写服务注册中心eureka-server之前先建立一个Maven主工程sleuth-zipkin，在主Maven工程中引入其内部module所需的共同依赖：Spring Boot 2.0.3X和Spring Cloud Finchley.RELEASE,主Maven工程的POM文件如下：
-```java
+    在编写服务注册中心eureka-server之前先建立一个Maven主工程sleuth-zipkin，在主Maven工程中引入其内部module所需的共同依赖：Spring Boot 2.0.3X和Spring Cloud Finchley.RELEASE,主Maven工程的pom文件如下：
+```xml
 <?xml version="1.0" encoding="UTF-8"?>
     <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -58,5 +58,125 @@
     </build>
 </project>
 ```
+&emsp;创建完Maven主工程后，在主工程下面创建一个新的module工程，命名为eureka-server，作为微服务的注册中心，在eureka-server的pom文件中集成主Maven工程，引入eureka server所需的起步依赖spring-cloud-starter-netflix-eureka-server、spring-boot-starter-test，该pom文件如下：
+```xml
+<parent>
+    <groupId>com.cnhtcqk</groupId>
+    <artifactId>sleuth-zipkin</artifactId>
+    <version>1.0-SNAPSHOT</version>
+</parent>
+
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-starter-netflix-eureka-server</artifactId>
+    </dependency>
+
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-test</artifactId>
+        <scope>test</scope>
+    </dependency>
+</dependencies>
+
+<build>
+    <plugins>
+        <plugin>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-maven-plugin</artifactId>
+        </plugin>
+    </plugins>
+</build>
+```
+&emsp;在配置文件application.yml文件中做相关配置：
+```yml
+#指定端口为8761
+server:
+  port: 8761
+#防止eureka-server注册自己，同时配置注册中心注册地址
+eureka:
+  client:
+    register-with-eureka: false
+    fetch-registry: false
+    service-url:
+      defaultzone: http://localhost:${server.port}/eureka/
+```
+&emsp;在工程的启动类EurekaServerApplication中添加注解@EnableEurekaServer打开作为注册中心的功能，代码如下：
+```java
+@SpringBootApplication
+@EnableEurekaServer
+public class EurekaServerApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(EurekaServerApplication.class, args);
+    }
+}
+```
+### zipkin服务端
+&emsp;在Spring Boot 2.X后需要下载官方提供的zipkin的jar包作为服务端，使用curl下载如下：在git命令行下运行
+```cmd
+    curl -sSL https://zipkin.io/quickstart.sh | bash -s
+```
+将会下载zipkin.jar到当前目录下。
 
 
+#
+#
+#
+#
+#
+#
+#
+#
+
+
+
+
+
+
+
+
+
+
+
+
+
+### 3. zipkin客户端
+&emsp;在主Maven工程下新建一个module工程，命名为trace-a，需要引入以下依赖：
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-webflux</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-sleuth</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-zipkin</artifactId>
+</dependency>
+```
+&emsp;在配置文件application.yml中做如下配置：
+```yml
+spring:
+  application:
+    name: trace-a #指定工项目名
+  sleuth:
+    web:
+      client:
+        enabled: true #打开sleuth客户端功能
+    sampler:
+      probability: 1.0 #将采样比设置为1，全部采样，默认为0.1
+  zipkin:
+    base-url: http://localhost:9411/ #指定链路追踪服务地址
+server:
+  port: 8762 
+eureka:
+  client:
+    service-url:
+      defaultzone: http://localhost:8761/eureka/ #指定服务注册中心地址
+```
