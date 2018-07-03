@@ -111,35 +111,16 @@ public class EurekaServerApplication {
     }
 }
 ```
-### zipkin服务端
-&emsp;在Spring Boot 2.X后需要下载官方提供的zipkin的jar包作为服务端，使用curl下载如下：在git命令行下运行
+### 2. zipkin服务端
+&emsp;在Spring Boot 2.X后需要下载官方提供的zipkin的jar包作为服务端，使用curl下载如下：在git命令行下运行下面语句，将会下载zipkin.jar到当前目录下。
 ```cmd
-    curl -sSL https://zipkin.io/quickstart.sh | bash -s
+curl -sSL https://zipkin.io/quickstart.sh | bash -s
 ```
-将会下载zipkin.jar到当前目录下。
-
-
-#
-#
-#
-#
-#
-#
-#
-#
-
-
-
-
-
-
-
-
-
-
-
-
-
+&emsp;zipkin.jar实际上就是一个spring Boot工程，可以使用java -jar的形式启动，如下
+```cmd
+java -jar zipkin.jar
+```
+&emsp;如果不指定zipkin server的端口，启动后将默认使用9411，此时访问http://localhost:9411/zipkin/将会看到以下界面：![](zipkin界面.png)
 ### 3. zipkin客户端
 &emsp;在主Maven工程下新建一个module工程，命名为trace-a，需要引入以下依赖：
 ```xml
@@ -180,3 +161,67 @@ eureka:
     service-url:
       defaultzone: http://localhost:8761/eureka/ #指定服务注册中心地址
 ```
+&emsp;Spring Cloud Finchley.RELEASE版本正式发布后，增加的一个新特性就是在引入eureka-client启动依赖后不需要在启动类中配置注解@EnableEurekaClient,spirng cloud会自动开启向注册中心注册功能，如果不需要开启注册功能只需要在配置文件中配置eureka.client.enable=false\
+&emsp;按照上述的方法建立第二个zipkin客户端，命名为trace-b,trace-b的创建方法和trace-a基本一致，不同的知识配置文件中的spring.application.name和server.port两项。
+&emsp;在trace-a工程下启动类下添加接口用来测试链路追踪，代码如下:
+trace-a启动类
+```java
+@SpringBootApplication
+@EnableEurekaClient
+@RestController
+
+public class TraceAApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(TraceAApplication.class, args);
+    }
+
+    @Autowired
+    private LoadBalancerExchangeFilterFunction lbFunction;
+
+    @Bean
+    public WebClient webClient() {
+        return WebClient.builder().baseUrl("http://trace-b")
+                .filter(lbFunction)
+                .build();
+    }
+
+    @GetMapping("/trace-a")
+    public Mono<String> trace() {
+        System.out.println("===call trace-a===");
+
+        return webClient().get()
+                .uri("/trace-b")
+                .retrieve()
+                .bodyToMono(String.class);
+    }
+}
+```
+trace-b启动类
+```java
+@SpringBootApplication
+@EnableEurekaClient
+@RestController
+public class TraceBApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(TraceBApplication.class, args);
+    }
+
+    @GetMapping("/trace-b")
+    public Mono<String> trace() {
+        System.out.println("===call trace-b===");
+
+        return Mono.just("Trace");
+    }
+}
+```
+&emsp;从上面的可以看出，调用/trace-a接口时，/trace-a接口会调用/trace-b接口。
+分别启动eureka-server、zipkin、trace-a、trace-b，分别访问http:localhost:8762/trace-a和http:localhost:8763/trace-b,这时访问http:localhost:9411/zipkin/并点击Find Trace按钮可以看到链路追踪的记录，如下图所示：
+![](zipkin链路追踪记录.png)
+
+点击每一条记录进去可以看到每一个服务的时间和顺序。\
+
+![](链路追踪记录详情.png)
+### 4.使用rabbitMQ传输链路数据
+&emsp;在上述例子中zipkin server 是通过http收集链路数据的，下面讲解如何使用消息组件RabbitMQ获取链路数据。
