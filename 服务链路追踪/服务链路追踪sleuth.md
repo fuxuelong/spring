@@ -216,12 +216,140 @@ public class TraceBApplication {
     }
 }
 ```
-&emsp;从上面的可以看出，调用/trace-a接口时，/trace-a接口会调用/trace-b接口。
-分别启动eureka-server、zipkin、trace-a、trace-b，分别访问http:localhost:8762/trace-a和http:localhost:8763/trace-b,这时访问http:localhost:9411/zipkin/并点击Find Trace按钮可以看到链路追踪的记录，如下图所示：
+&emsp;从上面的可以看出，调用/trace-a接口时，/trace-a接口会调用/trace-b接口。
+分别启动eureka-server、zipkin、trace-a、trace-b，分别访问http:localhost:8762/trace-a和http:localhost:8763/trace-b,这时访问http:localhost:9411/zipkin/并点击Find Trace按钮可以看到链路追踪的记录，如下图所示：
 ![](zipkin链路追踪记录.png)
 
-点击每一条记录进去可以看到每一个服务的时间和顺序。\
+点击每一条记录进去可以看到每一个服务的时间和顺序。
 
 ![](链路追踪记录详情.png)
 ### 4.使用rabbitMQ传输链路数据
-&emsp;在上述例子中zipkin server 是通过http收集链路数据的，下面讲解如何使用消息组件RabbitMQ获取链路数据。
+&emsp;在上述例子中zipkin server 是通过http收集链路数据的，下面讲解如何使用消息组件RabbitMQ获取链路数据。
+&emsp;使用RabbitMq需要对两个zipkin客户端进行改动，只需要在原有的基础上spring-cloud-stream-binder-rabbit依赖，其他不许要改动。
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-stream-binder-rabbit</artifactId>
+</dependency>
+```
+&emsp;同样zipkin server也需要做相应的修改，但是官方已经将其封装为jar包，只需要在启动时修改相应的配置即可。我们可以在启动时指定让zipkin从RabbitMQ中读取信息，如下
+```cmd
+java -jar --zipkin.collector.rabbitmq.addresses=localhost
+```
+除了上述方法我们也可以直接通过修改配置中的RABBITMQ_ADDRESSES常量
+&emsp;上述配置是写在官方jar包的配置文件中的，下面附上jar包中RabiitMQ相关的配置:
+```yml
+zipkin:
+    collector:
+        rabbitmq:
+            # RabbitMQ server address list (comma-separated list of host:port)
+            addresses: ${RABBIT_ADDRESSES:}
+            concurrency: ${RABBIT_CONCURRENCY:1}
+            # TCP connection timeout in milliseconds
+            connection-timeout: ${RABBIT_CONNECTION_TIMEOUT:60000}
+            password: ${RABBIT_PASSWORD:guest}
+            queue: ${RABBIT_QUEUE:zipkin}
+            username: ${RABBIT_USER:guest}
+            virtual-host: ${RABBIT_VIRTUAL_HOST:/}
+            useSsl: ${RABBIT_USE_SSL:false}
+            uri: ${RABBIT_URI:}
+```
+&emsp;另外，zipkin.jar的配置文件可以在此链接下查看:<https://github.com/openzipkin/zipkin/blob/master/zipkin-server/src/main/resources/zipkin-server-shared.yml>\
+&emsp;至此，RabbitMQ获取链路数据的服务端和客户端都已完成，分别启动eureka-server、trace-a、trace-b、zipkin.jar。完后访问http://localhost:8762/trace-a接口，并点击zipkin server页面的Find Traces按钮，可以看到以下页面，说明使用RabbitMQ传输数据成功。
+![](使用RabbitMQ.jpg)
+&emsp;为了确定是使用的RabbtMQ传输数据，而不是Http，可以将trace-a与trace-b工程中的spring.zipkin.base-url配置修改为一个错误的地址，或者直接屏蔽掉。在zipkin的配置文件中配置的访问RabbitMQ的账号和密码都默认是guest，如果你的RabbitMQ的账号或密码不是guest，需要在启动zipkin.jar时修改。
+### 5.使用MySQL存储链路数据
+&emsp;在上面的案例中，zipkin收集到的链路数据都是储存在内存中的，zipkin服务端重启后，链路数据都会消失，我们可以通过数据库的方式储存链路数据。
+&emsp;在接下来的案例中使用mysql数据库存储链路数据,获取链路数据的方式采用RabbitMQ,首先需要创建所需要的数据表，数据库脚本文件的地址为：<https://github.com/openzipkin/zipkin/blob/master/zipkin-storage/mysql-v1/src/main/resources/mysql.sql>，脚本将会创建zipkin_spans、zipkin_annotations、zipkin_dependencies三个表。\
+&emsp;使用mysql存储链路数据非常简单，在官方提供的zipkin.jar中已经集成所需要的依赖，只需要再启动时修改相应的配置即可，下面是相应的配置。
+ ```yml
+ zipkin:
+    collector:
+        storage:
+            type: ${STORAGE_TYPE:mem} #zipkin存储方式
+            mysql:
+                host: ${MYSQL_HOST:localhost} #数据库服务器地址
+                port: ${MYSQL_TCP_PORT:3306} #端口号
+                username: ${MYSQL_USER:} #用户名
+                password: ${MYSQL_PASS:} #密码
+                db: ${MYSQL_DB:zipkin} #数据库名
+                max-active: ${MYSQL_MAX_CONNECTIONS:10} #最大连接数
+                use-ssl: ${MYSQL_USE_SSL:false} #是否使用ssl连接
+```
+&emsp;以下为启动zipkin.jar时的参考语句。
+```cmd
+java -jar zipkin.jar 
+--zipkin.collector.rabbitmq.addresses=localhost --zipkin.storage.type=mysql
+--zipkin.storage.mysql.host=localhost --zipkin.storage.mysql.port=3306 
+--zipkin.storage.mysql.username=root  --zipkin.storage.mysql.password=12345678 
+--zipkin.storage.mysql.db=zipkin --zipkin.storage.mysql.use-ssl=false
+```
+或者采用如下方式：
+```cmd
+java -jar zipkin.jar 
+--RABBIT_ADDRESSES=localhost --STORAGE_TYPE=mysql 
+--MYSQL_HOST=localhost --MYSQL_TCP_PORT=3306 
+--MYSQL_USER=root --MYSQL_PASS=12345678 
+--MYSQL_DB=zipkin --MYSQL_USE_SSL=false
+```
+重新启动工程后，访问http://localhost:8762/trace-a接口，点击Find Trace按钮会看看有一条记录，而且数据库的表中会多了本次调用的链路追踪数据，如果此时重启zipkin.jar，再次点击Find Trace会发现上条记录依然存在，说明使用mysql数据库确实存储了链路数据
+### 6.使用ElasticsSearch存储链路数据
+&emsp;如果系统请求量很大，高并发的情况下，使用mysql存储链路数据必然有不合理之处，这时可以采用ElasticSearch存储数据，需要安装ElasticSearch，压缩包的下载地址为<https://www.elastic.co/downloads/elasticsearch>,windows系统中,选择下图中的ZIP包下载即可：
+![](ElasticSearch下载.jpg)
+下载解压后在bin目录下双击elasticsearch.bat即可启动，9200是ES对外的RESTFul接口，在浏览器中访问http://localhost:9200如果有以下输出说明安装成功：
+```json
+{
+  "name" : "iCXVoe1",
+  "cluster_name" : "elasticsearch",
+  "cluster_uuid" : "Js9ioT60SBiUVooE_mY_MQ",
+  "version" : {
+    "number" : "6.3.0",
+    "build_flavor" : "default",
+    "build_type" : "zip",
+    "build_hash" : "424e937",
+    "build_date" : "2018-06-11T23:38:03.357887Z",
+    "build_snapshot" : false,
+    "lucene_version" : "7.3.1",
+    "minimum_wire_compatibility_version" : "5.6.0",
+    "minimum_index_compatibility_version" : "5.0.0"
+  },
+  "tagline" : "You Know, for Search"
+}
+```
+&emsp;以上输出的各项的含义可以自行查询。如果需要对ES进行其他配置，可以在config/elasticsearch.yml中进行配置。
+&emsp;本节的案例与上节类似，不需要对程序进行修改，只需要在启动zipkin.jar的时候修改相应的配置即可，需要先指定zipkin的存储类型为elasticsearch，指定ElasticSearch的服务器地址等，下面是zipkin.jar中的关于elasticsearch的配置。
+```yml
+ zipkin:
+    collector:
+        storage:
+            type: ${STORAGE_TYPE:mem} #zipkin存储方式
+            elasticsearch:
+                # host is left unset intentionally, to defer the decision
+                hosts: ${ES_HOSTS:}
+                pipeline: ${ES_PIPELINE:}
+                max-requests: ${ES_MAX_REQUESTS:64}
+                timeout: ${ES_TIMEOUT:10000}
+                index: ${ES_INDEX:zipkin}
+                date-separator: ${ES_DATE_SEPARATOR:-}
+                index-shards: ${ES_INDEX_SHARDS:5}
+                index-replicas: ${ES_INDEX_REPLICAS:1}
+                username: ${ES_USERNAME:}
+                password: ${ES_PASSWORD:}
+                http-logging: ${ES_HTTP_LOGGING:}
+                legacy-reads-enabled: ${ES_LEGACY_READS_ENABLED:true}
+```
+&emsp;按照如下方式启动zipkin.jar，指定zipkin的寻出方式为elasticsearch，ES的服务器地址端口为localhost:9200
+```cmd
+java -jar zipkin.jar 
+--RABBIT_ADDRESSES=localhost --ES_HOSTS=localhost:9200 --STORAGE_TYPE=elasticsearch
+```
+&emsp;同样按照上节使用的方法测试，调用http://localhost:8762/trace-a接口后zipkin管理页面显示一条记录，重启zipkin.jar后记录依旧存在，说明收集的链路数据已经存储在ES当中。
+### 7.使用Kibana展示ElasticSearch中的链路数据
+&emsp;Kibana是一款开源的可视化分析平台，可以用kibana搜索、查看、交互存放在Elasticsearch索引里的数据，使用各种不同的图表、表格、地图等kibana能够很轻易地展示高级数据分析与可视化。\
+&emsp;kibana的下载地址为<https://www.elastic.co/downloads/kibana>,下载如下图中的压缩包。
+![](kibana下载.jpg)
+&emsp;下载解压后,在bin目录下运行kibana.bat,然后在浏览器中访问http://localhost:5601,显示界面如图所示。
+![](kibana启动界面.jpg)
+&emsp;进入management，单击Index Patterns，然后单击Create Index Patterns添加一个Index Patterns。在填写界面t填写index name为zipkin*，然后点击下一步配置时间过滤，最后点击Create index Pattern.
+&emsp;创建完index后，单击“Discover”，就可以在界面上展示链路数据了，如下图所示：
+![](kibana链路数据.jpg)
